@@ -1,0 +1,79 @@
+{
+  "name": "bilibili-video-transcriber",
+  "version": "1.0.0",
+  "description": "专业处理B站视频字幕问题，支持语音转文字、字幕下载、内容分析",
+  "main": "bilibili_transcriber.py",
+  "scripts": {
+    "install": "python setup.py",
+    "test": "python test_install.py",
+    "clean": "rm -rf __pycache__ *.log bilibili_transcripts"
+  },
+  "keywords": [
+    "bilibili",
+    "transcribe",
+    "whisper",
+    "subtitle",
+    "speech-to-text",
+    "ai",
+    "video-processing"
+  ],
+  "author": "B站视频转录专家团队",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/community/bilibili-transcriber-pro.git"
+  },
+  "bugs": {
+    "url": "https://github.com/community/bilibili-transcriber-pro/issues"
+  },
+  "homepage": "https://github.com/community/bilibili-transcriber-pro#readme",
+  "dependencies": {
+    "bilibili-api": ">=5.2.0",
+    "requests": ">=2.28.0",
+    "pydub": ">=0.25.1",
+    "faster-whisper": ">=0.10.0",
+    "pyyaml": ">=6.0",
+    "tqdm": ">=4.65.0",
+    "colorama": ">=0.4.6"
+  },
+  "engines": {
+    "python": ">=3.8"
+  },
+  "files": [
+    "bilibili_transcriber.py",
+    "cli.py",
+    "config.yaml",
+    "setup.py",
+    "requirements.txt",
+    "README.md",
+    "SKILL.md",
+    "package.json",
+    "test_install.py",
+    "examples/"
+  ],
+  "bin": {
+    "bilibili-transcribe": "cli.py"
+  },
+  "clawhub": {
+    "category": "video-processing",
+    "tags": ["bilibili", "transcription", "whisper", "subtitle"],
+    "icon": "🎬",
+    "minOpenClawVersion": "1.0.0",
+    "compatibility": {
+      "platforms": ["linux", "darwin", "win32"],
+      "python": ">=3.8"
+    },
+    "installation": {
+      "type": "python-package",
+      "command": "python setup.py"
+    },
+    "usage": {
+      "command": "bilibili-transcribe",
+      "examples": [
+        "bilibili-transcribe BV1txQGByERW",
+        "bilibili-transcribe --batch bv_list.txt",
+        "bilibili-transcribe --check-cookie"
+      ]
+    }
+  }
+}
