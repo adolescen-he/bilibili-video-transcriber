@@ -1,7 +1,17 @@
 ---
 name: bilibili-video-transcriber
 description: 专业处理B站视频字幕问题，支持语音转文字、字幕下载、内容分析。基于实际B站字幕系统错误问题开发，提供完整的解决方案。
-metadata: {"clawdbot":{"emoji":"🎬","requires":{"anyBins":["python3","ffmpeg"]},"os":["linux","darwin","win32"]}}
+metadata:
+  clawdbot:
+    emoji: "🎬"
+    requires:
+      anyBins:
+        - python3
+        - ffmpeg
+    os:
+      - linux
+      - darwin
+      - win32
 ---
 
 # 🎬 B站视频转录专家
