@@ -1,5 +1,11 @@
 name: Test Bilibili Transcriber
 
+# 权限设置
+permissions:
+  contents: write
+  actions: write
+  checks: write
+
 on:
   push:
     branches: [ main, master ]
