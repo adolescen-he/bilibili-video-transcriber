@@ -1,6 +1,6 @@
 ---
 name: bilibili-video-transcriber
-description: 专业处理B站视频字幕问题，支持语音转文字、字幕下载、内容分析。基于实际B站字幕系统错误问题开发，提供完整的解决方案。
+description: 专业处理 B 站视频字幕问题，支持语音转文字、字幕下载、内容分析。基于实际 B 站字幕系统错误问题开发，提供完整的解决方案。
 metadata:
   clawdbot:
     emoji: "🎬"
@@ -14,25 +14,27 @@ metadata:
       - win32
 ---
 
-# 🎬 B站视频转录专家
+# 🎬 B 站视频转录专家
 
-**专业处理B站视频字幕问题，支持语音转文字、字幕下载、内容分析**
+**专业处理 B 站视频字幕问题，支持语音转文字、字幕下载、内容分析**
 
 ## 📋 功能特性
 
 ### ✅ 核心功能
-1. **智能字幕处理**：自动检测B站字幕系统状态，智能选择最佳方案
-2. **语音转文字**：使用Whisper模型进行高精度语音识别
+1. **智能字幕处理**：自动检测 B 站字幕系统状态，智能选择最佳方案
+2. **语音转文字**：使用 Whisper/Vosk 模型进行高精度语音识别
 3. **国内镜像支持**：自动使用国内镜像源，解决网络问题
 4. **错误处理**：自动检测字幕关联错误，切换到语音转文字
-5. **批量处理**：支持批量处理多个B站视频
+5. **批量处理**：支持批量处理多个 B 站视频
+6. **大会员支持**：支持扫码登录获取大会员权限，下载高音质视频
 
 ### 🔧 技术特点
-- **绕过B站字幕系统**：直接处理音频，避免字幕关联错误
-- **多模型支持**：Whisper base/small/medium模型可选
-- **Cookie管理**：支持Cookie文件管理和自动刷新
+- **绕过 B 站字幕系统**：直接处理音频，避免字幕关联错误
+- **多模型支持**：Whisper base/small/medium 或 Vosk 离线模型
+- **Cookie 管理**：支持扫码登录和 Cookie 文件管理
 - **进度显示**：实时显示下载和转录进度
 - **结果验证**：自动验证转录内容与视频标题相关性
+- **镜像自动切换**：模型下载失败时自动切换到国内镜像源
 
 ## 🚀 快速开始
 
@@ -42,12 +44,15 @@ metadata:
 clawhub install bilibili-transcriber-pro
 
 # 或手动安装依赖
-pip install bilibili-api requests pydub faster-whisper
+pip install bilibili-api requests pydub faster-whisper vosk qrcode
 ```
 
-### 2. 配置Cookie
+### 2. 配置 Cookie
 ```bash
-# 创建Cookie文件
+# 方式 1：扫码登录（推荐）
+bilibili-transcribe --login
+
+# 方式 2：手动创建 Cookie 文件
 echo "SESSDATA=xxx; bili_jct=xxx; buvid3=xxx; DedeUserID=xxx" > ~/.bilibili_cookie.txt
 ```
 
@@ -56,7 +61,7 @@ echo "SESSDATA=xxx; bili_jct=xxx; buvid3=xxx; DedeUserID=xxx" > ~/.bilibili_cook
 # 处理单个视频
 bilibili-transcribe BV1txQGByERW
 
-# 指定Cookie文件
+# 指定 Cookie 文件
 bilibili-transcribe BV1txQGByERW --cookie ~/.bilibili_cookie.txt
 
 # 批量处理
@@ -76,11 +81,17 @@ bilibili-transcribe BV1txQGByERW --output ./results
 # 使用指定模型
 bilibili-transcribe BV1txQGByERW --model medium
 
+# 使用 Vosk 离线模型（无需网络）
+bilibili-transcribe BV1txQGByERW --engine vosk
+
 # 仅下载音频
 bilibili-transcribe BV1txQGByERW --audio-only
 
 # 检查字幕状态
 bilibili-transcribe BV1txQGByERW --check-only
+
+# 扫码登录
+bilibili-transcribe --login
 ```
 
 ### Python API
@@ -111,15 +122,16 @@ results = transcriber.process_batch(
 
 ### 配置文件 `~/.config/bilibili_transcriber/config.yaml`
 ```yaml
-# Cookie配置
+# Cookie 配置
 cookie:
   file: "~/.bilibili_cookie.txt"
   auto_refresh: true
-  refresh_interval: 86400  # 24小时
+  refresh_interval: 86400  # 24 小时
 
 # 模型配置
 model:
-  name: "base"  # base/small/medium
+  engine: "whisper"  # whisper/vosk
+  name: "base"  # base/small/medium (whisper) 或 vosk-model-small-cn-0.22 (vosk)
   device: "cpu"  # cpu/cuda
   compute_type: "int8"
   language: "zh"
@@ -127,6 +139,10 @@ model:
 # 网络配置
 network:
   hf_endpoint: "https://hf-mirror.com"
+  auto_switch_mirror: true  # 自动切换镜像源
+  mirrors:
+    - "https://huggingface.co"
+    - "https://hf-mirror.com"
   timeout: 30
   retry_times: 3
 
@@ -148,26 +164,26 @@ validation:
 
 ### 1. 文本格式 (`transcript.txt`)
 ```
-[0.00s -> 3.90s] 兄弟们HermesAgent刚刚发布了更新4.13
+[0.00s -> 3.90s] 兄弟们 HermesAgent 刚刚发布了更新 4.13
 [3.90s -> 5.76s] 那么这一次最大的一个升级呢
 [5.76s -> 9.00s] 是它带来了本地的外部控制面板
 ...
 ```
 
-### 2. JSON格式 (`transcript.json`)
+### 2. JSON 格式 (`transcript.json`)
 ```json
 {
   "video_info": {
     "bvid": "BV1txQGByERW",
-    "title": "HermesAgent突然上WebUI了！这一波，体验直接拉满",
+    "title": "HermesAgent 突然上 WebUI 了！这一波，体验直接拉满",
     "duration": 210,
-    "up": "磊哥聊AI"
+    "up": "磊哥聊 AI"
   },
   "transcript": [
     {
       "start": 0.0,
       "end": 3.9,
-      "text": "兄弟们HermesAgent刚刚发布了更新4.13",
+      "text": "兄弟们 HermesAgent 刚刚发布了更新 4.13",
       "confidence": 0.95
     },
     ...
@@ -180,30 +196,106 @@ validation:
 }
 ```
 
-### 3. Markdown格式 (`summary.md`)
+### 3. Markdown 格式 (`summary.md`)
 ```markdown
-# HermesAgent突然上WebUI了！这一波，体验直接拉满
+# HermesAgent 突然上 WebUI 了！这一波，体验直接拉满
 
 **视频信息**
-- BV号: BV1txQGByERW
-- 时长: 210秒
-- UP主: 磊哥聊AI
-- 处理时间: 2026-04-15 08:16:00
+- BV 号：BV1txQGByERW
+- 时长：210 秒
+- UP 主：磊哥聊 AI
+- 处理时间：2026-04-15 08:16:00
 
 **核心内容**
-1. HermesAgent 4.13版本发布
-2. 新增本地WebUI控制面板
+1. HermesAgent 4.13 版本发布
+2. 新增本地 WebUI 控制面板
 3. 支持中英文界面
 4. 提供状态监控、会话管理等功能
 
 **完整转录**
-[0.00s -> 3.90s] 兄弟们HermesAgent刚刚发布了更新4.13
+[0.00s -> 3.90s] 兄弟们 HermesAgent 刚刚发布了更新 4.13
 ...
 ```
 
 ## 🔍 高级功能
 
-### 1. 字幕验证系统
+### 1. 扫码登录（大会员支持）
+```python
+from bilibili_transcriber import BilibiliLogin
+
+# 生成二维码
+login = BilibiliLogin()
+qr_url = login.generate_qr()
+print(f"请用 B 站 APP 扫码：{qr_url}")
+
+# 验证登录状态
+result = login.poll()
+if result['success']:
+    print(f"登录成功！用户：{result['username']}")
+    print(f"大会员状态：{'✅' if result['is_vip'] else '❌'}")
+    print(f"Cookie 已保存到：~/.bilibili_cookie.txt")
+```
+
+### 2. 镜像源自动切换
+```python
+import os
+from faster_whisper import WhisperModel
+
+def load_model_with_retry(model_name, device="cpu", compute_type="int8"):
+    """加载模型，失败时自动切换到国内镜像"""
+    mirrors = [
+        ("原始源", "https://huggingface.co"),
+        ("国内镜像", "https://hf-mirror.com"),
+    ]
+    
+    for name, mirror in mirrors:
+        try:
+            if mirror != "https://huggingface.co":
+                print(f"🔄 切换到镜像源：{mirror}")
+                os.environ['HF_ENDPOINT'] = mirror
+            
+            model = WhisperModel(model_name, device=device, compute_type=compute_type)
+            print(f"✅ 模型加载成功：{model_name} (来源：{name})")
+            return model
+            
+        except Exception as e:
+            print(f"❌ 镜像源 {name} 失败：{e}")
+    
+    raise Exception("所有镜像源都失败，请检查网络连接")
+
+# 使用示例
+model = load_model_with_retry("base", device="cpu", compute_type="int8")
+```
+
+### 3. Vosk 离线转录（无需网络）
+```python
+from vosk import Model, KaldiRecognizer
+import wave
+
+# 加载离线模型
+model = Model("/root/.cache/vosk/vosk-model-small-cn-0.22")
+
+# 转录音频
+wf = wave.open("audio.wav", "rb")
+rec = KaldiRecognizer(model, wf.getframerate())
+
+transcript = []
+while True:
+    data = wf.readframes(4000)
+    if len(data) == 0:
+        break
+    if rec.AcceptWaveform(data):
+        result = json.loads(rec.Result())
+        transcript.append(result['text'])
+
+final_result = json.loads(rec.FinalResult())
+if final_result.get('text'):
+    transcript.append(final_result['text'])
+
+print("转录完成：", " ".join(transcript))
+```
+
+### 4. 字幕验证系统
 ```python
 # 自动验证字幕准确性
 validator = SubtitleValidator()
@@ -214,12 +306,12 @@ result = validator.validate(
 )
 
 if result["is_valid"]:
-    print(f"✅ 字幕验证通过: {result['match_rate']:.1%} 匹配度")
+    print(f"✅ 字幕验证通过：{result['match_rate']:.1%} 匹配度")
 else:
-    print(f"⚠️ 字幕可能有问题: {result['match_rate']:.1%} 匹配度")
+    print(f"⚠️ 字幕可能有问题：{result['match_rate']:.1%} 匹配度")
 ```
 
-### 2. 批量处理
+### 5. 批量处理
 ```bash
 # 创建视频列表文件
 echo "BV1txQGByERW" > bv_list.txt
@@ -229,29 +321,29 @@ echo "BV1xxxxxxx" >> bv_list.txt
 bilibili-transcribe --batch bv_list.txt --parallel 3
 ```
 
-### 3. 结果分析
+### 6. 结果分析
 ```python
 from bilibili_transcriber.analyzer import TranscriptAnalyzer
 
 analyzer = TranscriptAnalyzer()
 analysis = analyzer.analyze(transcript_text)
 
-print(f"总时长: {analysis['duration']}秒")
-print(f"段落数: {analysis['segment_count']}")
-print(f"关键词: {analysis['top_keywords']}")
-print(f"摘要: {analysis['summary']}")
+print(f"总时长：{analysis['duration']}秒")
+print(f"段落数：{analysis['segment_count']}")
+print(f"关键词：{analysis['top_keywords']}")
+print(f"摘要：{analysis['summary']}")
 ```
 
 ## ⚙️ 故障排除
 
 ### 常见问题
 
-#### 1. Cookie失效
+#### 1. Cookie 失效
 ```bash
-# 重新获取Cookie
+# 重新获取 Cookie
 bilibili-transcribe --update-cookie
 
-# 手动设置Cookie
+# 手动设置 Cookie
 export BILIBILI_COOKIE="SESSDATA=xxx; bili_jct=xxx"
 ```
 
@@ -273,6 +365,49 @@ bilibili-transcribe BV1txQGByERW --model-path ./local_models/
 bilibili-transcribe BV1txQGByERW --skip-model-check
 ```
 
+#### 4. HuggingFace 下载失败（新增）
+**问题：** 使用 faster-whisper 下载模型时出现 `ConnectError: [Errno 101] Network is unreachable`
+
+**原因：** HuggingFace 服务器网络连接不稳定
+
+**解决方案：**
+
+**方案 1：自动切换到国内镜像**
+```python
+import os
+os.environ['HF_ENDPOINT'] = 'https://hf-mirror.com'
+```
+
+**方案 2：手动指定镜像源**
+```bash
+HF_ENDPOINT=https://hf-mirror.com python -m pip install faster-whisper
+```
+
+**方案 3：使用本地缓存模型**
+```python
+model = WhisperModel(
+    "/root/.cache/huggingface/hub/models--Systran--faster-whisper-base",
+    device="cpu",
+    compute_type="int8"
+)
+```
+
+**方案 4：使用 Vosk 离线模型（推荐）**
+```bash
+# Vosk 模型已缓存，无需网络
+bilibili-transcribe BV1txQGByERW --engine vosk
+```
+
+#### 5. B 站 API 412 错误
+**问题：** 调用 B 站 API 时返回 HTTP 412 Precondition Failed
+
+**原因：** 缺少 WBI 签名或 Cookie 失效
+
+**解决方案：**
+1. 重新扫码登录获取新 Cookie
+2. 使用大会员 Cookie（权限更高）
+3. 添加 WBI 签名（代码自动处理）
+
 ### 调试模式
 ```bash
 # 启用详细日志
@@ -293,7 +428,7 @@ bilibili-transcribe BV1txQGByERW --keep-temp
 transcriber = BilibiliTranscriber(
     use_cache=True,
     cache_dir="~/.cache/bilibili_transcriber",
-    cache_ttl=3600  # 1小时
+    cache_ttl=3600  # 1 小时
 )
 ```
 
@@ -311,19 +446,19 @@ bilibili-transcribe BV1txQGByERW --threads 2
 # 限制内存使用
 bilibili-transcribe BV1txQGByERW --max-memory 2G
 
-# 限制CPU使用
+# 限制 CPU 使用
 bilibili-transcribe BV1txQGByERW --cpu-limit 50%
 ```
 
 ## 🔗 集成示例
 
-### 1. 与OpenClaw集成
+### 1. 与 OpenClaw 集成
 ```python
 from openclaw.skills import bilibili_transcriber
 
 @skill("bilibili-transcribe")
 def handle_bilibili_transcribe(request):
-    """处理B站视频转录请求"""
+    """处理 B 站视频转录请求"""
     bvid = request.params.get("bvid")
     
     # 调用转录功能
@@ -339,7 +474,7 @@ def handle_bilibili_transcribe(request):
 ### 2. 自动化工作流
 ```yaml
 # workflow.yaml
-name: B站视频处理流水线
+name: B 站视频处理流水线
 steps:
   - name: 下载视频
     action: bilibili-transcribe
@@ -362,16 +497,16 @@ steps:
 
 ## 📚 使用案例
 
-### 案例1：技术教程转录
+### 案例 1：技术教程转录
 ```bash
-# 转录AI技术教程
+# 转录 AI 技术教程
 bilibili-transcribe BV1txQGByERW --output ./ai_tutorials
 
 # 生成学习笔记
 bilibili-transcribe BV1txQGByERW --format markdown --template study_note.md
 ```
 
-### 案例2：内容分析
+### 案例 2：内容分析
 ```python
 # 分析多个视频内容
 from bilibili_transcriber import BatchAnalyzer
@@ -386,18 +521,41 @@ results = analyzer.analyze_batch(
 report = analyzer.generate_comparison_report(results)
 ```
 
-### 案例3：自动化监控
+### 案例 3：自动化监控
 ```python
-# 监控特定UP主的新视频
+# 监控特定 UP 主的新视频
 from bilibili_transcriber.monitor import VideoMonitor
 
 monitor = VideoMonitor(
-    up_mid="12345678",  # UP主ID
+    up_mid="12345678",  # UP 主 ID
     check_interval=3600,  # 每小时检查一次
     callback=process_new_video
 )
 
 monitor.start()
+```
+
+### 案例 4：飞书知识库归档（新增）
+```python
+# 转录完成后自动归档到飞书知识库
+from bilibili_transcriber import BilibiliTranscriber
+from feishu_create_doc import create_wiki_doc
+
+# 转录视频
+transcriber = BilibiliTranscriber()
+result = transcriber.process("BV1E7wtzaEdq")
+
+# 整理为结构化文档
+markdown_content = format_to_markdown(result)
+
+# 创建飞书知识库文档
+doc_url = create_wiki_doc(
+    title="📚 视频转录：从 LLM 到 Agent Skill",
+    markdown=markdown_content,
+    wiki_space="7624328764398324948"  # AI 工具知识库
+)
+
+print(f"文档已创建：{doc_url}")
 ```
 
 ## 🧪 测试
@@ -417,8 +575,100 @@ python -m pytest tests/test_transcribe.py
 # 测试完整流程
 python -m pytest tests/integration/test_full_flow.py
 
-# 使用测试Cookie
+# 使用测试 Cookie
 BILIBILI_TEST_COOKIE="test_cookie" python -m pytest
+```
+
+## 📝 实战经验总结
+
+### 完整工作流（2026-04-19 更新）
+
+**成功路径：**
+```
+B 站视频 → 扫码登录 → 获取 cookie → 下载视频 → 
+ffmpeg 提取音频 → Vosk/Whisper 转录 → 整理结构化文档 → 
+飞书知识库归档
+```
+
+**关键步骤：**
+
+1. **B 站扫码登录**
+   - 使用 `passport.bilibili.com` API 生成二维码
+   - 轮询验证登录状态
+   - 提取 cookie 并保存（Netscape 格式）
+   - 大会员 cookie 有效期约 1 年
+
+2. **视频下载**
+   - 使用大会员 cookie 获取高音质视频
+   - 注意 URL 有效期（需尽快下载）
+   - 使用 wget 或 requests 下载
+
+3. **音频提取**
+   ```bash
+   ffmpeg -i video.mp4 -vn -acodec pcm_s16le -ar 16000 -ac 1 audio.wav
+   ```
+
+4. **语音转录**
+   - **Vosk（离线）**：无需网络，准确率~85%
+   - **Whisper（在线）**：需要网络，准确率~95%
+   - 采样率必须为 16000Hz
+
+5. **结构化整理**
+   - 按主题分组转录内容
+   - 提取核心概念
+   - 添加对比表格和示例
+   - 提炼关键洞察
+
+6. **知识库归档**
+   - 使用 `feishu_create_doc` + `wiki_space` 参数
+   - 支持 Markdown 格式
+   - 自动添加目录和格式化
+
+**技术栈：**
+| 工具 | 用途 |
+|------|------|
+| requests | API 调用 |
+| qrcode | 二维码生成 |
+| ffmpeg | 音频提取 |
+| vosk | 离线语音识别 |
+| faster-whisper | 在线语音识别 |
+| yt-dlp/wget | 视频下载 |
+| 飞书 API | 知识库归档 |
+
+**注意事项：**
+- Cookie 需定期更新（有效期约 1 年）
+- WBI 签名：B 站 API 需要动态签名
+- Vosk 模型：提前下载缓存
+- 飞书权限：确保有知识库写入权限
+- 视频 URL：有有效期，需尽快下载
+
+### 模型下载失败处理（2026-04-18 更新）
+
+**问题：** HuggingFace 下载失败 `Network is unreachable`
+
+**解决方案：**
+1. 设置环境变量 `HF_ENDPOINT=https://hf-mirror.com`
+2. 代码中自动切换镜像源
+3. 使用本地缓存模型
+4. 使用 Vosk 离线模型（推荐）
+
+**代码实现：**
+```python
+def load_model_with_retry(model_name, device="cpu", compute_type="int8"):
+    mirrors = [
+        ("原始源", "https://huggingface.co"),
+        ("国内镜像", "https://hf-mirror.com"),
+    ]
+    
+    for name, mirror in mirrors:
+        try:
+            if mirror != "https://huggingface.co":
+                os.environ['HF_ENDPOINT'] = mirror
+            model = WhisperModel(model_name, device, compute_type)
+            return model
+        except Exception as e:
+            continue
+    raise Exception("所有镜像源失败")
 ```
 
 ## 📄 许可证
@@ -427,17 +677,19 @@ MIT License
 
 ## 🤝 贡献指南
 
-1. Fork项目
+1. Fork 项目
 2. 创建功能分支
 3. 提交更改
-4. 创建Pull Request
+4. 创建 Pull Request
 
 ## 📞 支持
 
-- 问题反馈: GitHub Issues
-- 文档: https://github.com/yourname/bilibili-transcriber-pro
-- 讨论: Discord/微信群
+- 问题反馈：GitHub Issues
+- 文档：https://github.com/yourname/bilibili-transcriber-pro
+- 讨论：Discord/微信群
 
 ---
 
-**基于实际经验开发，专门解决B站字幕系统错误问题，稳定可靠！**
+**基于实际经验开发，专门解决 B 站字幕系统错误问题，稳定可靠！**
+
+**最后更新：** 2026-04-19
