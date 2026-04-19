@@ -1,7 +1,10 @@
 {
-  "version": 1,
+  "version": 2,
   "registry": "https://clawhub.ai",
   "slug": "bilibili-video-transcriber",
-  "installedVersion": "1.0.0",
-  "installedAt": 1776174724000
+  "installedVersion": "2.0.0",
+  "installedAt": 1776569700000,
+  "lastUpdated": 1776569700000,
+  "gitUrl": "https://github.com/adolescen-he/bilibili-video-transcriber.git",
+  "branch": "main"
 }
