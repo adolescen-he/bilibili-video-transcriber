@@ -638,8 +638,8 @@ class BilibiliTranscriber:
             beam_size=5,
             best_of=5,
             word_timestamps=False,
-            prepend_punctuations="\"'""¿([{-",
-            append_punctuations="\"'.。,，!！?？:：")]}",
+            prepend_punctuations="\"'¿([{-",
+            append_punctuations="\"'.。,，!！?：:"
         )
         
         logger.info(f"语言检测：{info.language}, 置信度：{info.language_probability:.2f}")
