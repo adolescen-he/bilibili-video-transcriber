@@ -62,6 +62,16 @@ class TranscriptSegment:
 
 
 @dataclass
+class CommentInfo:
+    """评论信息"""
+    user: str
+    message: str
+    like: int
+    reply_count: int
+    reply_to: Optional[str] = None  # 回复的目标用户
+
+
+@dataclass
 class ProcessingResult:
     """处理结果"""
     success: bool
@@ -73,6 +83,7 @@ class ProcessingResult:
     error: Optional[str] = None
     warnings: Optional[List[str]] = None
     method_used: Optional[str] = None  # 使用的方法：cc_subtitle/ai_subtitle/audio_transcribe
+    comments: Optional[List[CommentInfo]] = None  # 热门评论
 
 
 class BilibiliTranscriber:
@@ -112,6 +123,9 @@ class BilibiliTranscriber:
         self.language = language
         self.prefer_offline = prefer_offline
         self.auto_switch_mirror = auto_switch_mirror
+        self.cookie_valid = False
+        self.cookie_username = None
+        self.credential = None
         
         # 自动检测系统资源并选择合适的模型
         if model_name is None or device is None:
@@ -195,51 +209,51 @@ class BilibiliTranscriber:
         }
     
     def _load_cookie(self) -> Optional[str]:
-        """加载 Cookie"""
-        if not self.cookie_file:
-            cookie = os.environ.get('BILIBILI_COOKIE')
-            if cookie:
-                logger.info("从环境变量加载 Cookie")
-                return cookie
-            
-            default_paths = [
-                "~/.bilibili_cookie.txt",
-                "~/bilibili_cookie.txt",
-                "./bilibili_cookie.txt"
-            ]
-            
-            for path in default_paths:
-                expanded_path = Path(path).expanduser()
-                if expanded_path.exists():
-                    self.cookie_file = str(expanded_path)
-                    logger.info(f"找到 Cookie 文件：{self.cookie_file}")
-                    break
+        """加载 Cookie（使用 cookie_manager 冗余存储）"""
+        from cookie_manager import load_cookie, check_cookie_valid, save_cookie
         
-        if self.cookie_file and Path(self.cookie_file).exists():
-            try:
-                with open(self.cookie_file, 'r') as f:
-                    return f.read().strip()
-            except Exception as e:
-                logger.warning(f"读取 Cookie 文件失败：{e}")
+        # 1. 如果手动指定了 cookie_file，优先使用
+        if self.cookie_file:
+            path = Path(self.cookie_file).expanduser()
+            if path.exists():
+                try:
+                    with open(path, 'r') as f:
+                        cookie_str = f.read().strip()
+                    if cookie_str:
+                        # 同步到冗余存储
+                        save_cookie(cookie_str)
+                        self.cookie_file = str(path)
+                        return cookie_str
+                except Exception as e:
+                    logger.warning(f"读取指定 cookie_file 失败：{e}")
         
-        logger.warning("未找到有效的 Cookie，部分功能可能受限")
+        # 2. 使用 cookie_manager 的冗余加载
+        cookie_str = load_cookie()
+        if cookie_str:
+            return cookie_str
+        
+        # 3. 检查环境变量
+        env_cookie = os.environ.get('BILIBILI_COOKIE')
+        if env_cookie:
+            logger.info("📦 从环境变量加载 Cookie")
+            return env_cookie
+        
+        logger.warning("⚠️ 未找到有效的 Cookie，部分功能可能受限")
         return None
     
     def _create_credential(self):
-        """创建凭证"""
+        """创建凭证（带自动验证和失效检测）"""
         from bilibili_api import Credential
+        from cookie_manager import parse_cookie
         
         cookie_str = self._load_cookie()
         if not cookie_str:
             self.credential = None
+            self.cookie_valid = False
             return
         
         try:
-            cookies = {}
-            for item in cookie_str.split('; '):
-                if '=' in item:
-                    k, v = item.split('=', 1)
-                    cookies[k] = v
+            cookies = parse_cookie(cookie_str)
             
             credential = Credential(
                 sessdata=cookies.get('SESSDATA', ''),
@@ -248,12 +262,111 @@ class BilibiliTranscriber:
                 dedeuserid=cookies.get('DedeUserID', '')
             )
             
-            logger.info("凭证创建成功")
+            # 验证 Cookie 有效性
+            from cookie_manager import check_cookie_valid
+            check = check_cookie_valid(cookie_str)
+            
+            if check["valid"]:
+                logger.info(f"✅ Cookie 有效 (用户: {check.get('username')}, 大会员: {check.get('is_vip')})")
+                self.cookie_valid = True
+                self.cookie_username = check.get('username')
+            else:
+                logger.warning(f"⚠️ Cookie 可能已失效: {check.get('error')}")
+                self.cookie_valid = False
+            
             self.credential = credential
             
         except Exception as e:
             logger.error(f"创建凭证失败：{e}")
             self.credential = None
+            self.cookie_valid = False
+    
+    def get_comments(
+        self,
+        bvid: str,
+        aid: int,
+        max_count: int = 30,
+        max_replies_per_comment: int = 3
+    ) -> Optional[List[CommentInfo]]:
+        """
+        获取视频的热门评论（按点赞排序），以及热评下的部分回复
+        
+        Args:
+            bvid: BV 号
+            aid: 视频 aid（数字 ID）
+            max_count: 最多获取多少条热评
+            max_replies_per_comment: 每条热评最多获取多少条回复
+            
+        Returns:
+            List[CommentInfo] 或 None
+        """
+        try:
+            from bilibili_api import comment, sync
+            from bilibili_api.comment import CommentResourceType, OrderType
+            
+            logger.info(f"📬 获取视频热门评论（最多 {max_count} 条）...")
+            
+            # 获取按热度排序的评论
+            comments_data = sync(comment.get_comments(
+                oid=aid,
+                type_=CommentResourceType.VIDEO,
+                page_index=1,
+                order=OrderType.LIKE,
+                credential=self.credential
+            ))
+            
+            total = comments_data.get('page', {}).get('acount', 0)
+            replies = comments_data.get('replies', [])
+            
+            if not replies:
+                logger.info("📬 无评论")
+                return None
+            
+            logger.info(f"📬 共 {total} 条评论，获取前 {min(len(replies), max_count)} 条热评")
+            
+            comments_list = []
+            for c in replies[:max_count]:
+                comment_info = CommentInfo(
+                    user=c.get('member', {}).get('uname', '未知用户'),
+                    message=c.get('content', {}).get('message', '').strip(),
+                    like=c.get('like', 0),
+                    reply_count=c.get('rcount', 0)
+                )
+                comments_list.append(comment_info)
+                
+                # 获取热评下的回复
+                if max_replies_per_comment > 0 and c.get('rcount', 0) > 0:
+                    try:
+                        rpid = c.get('rpid', 0)
+                        replies_data = sync(comment.get_comments(
+                            oid=aid,
+                            type_=CommentResourceType.VIDEO,
+                            page_index=1,
+                            order=OrderType.TIME,
+                            credential=self.credential
+                        ))
+                        # 查找该评论的子回复
+                        for reply in replies_data.get('replies', []):
+                            if reply.get('parent', 0) == rpid:
+                                comments_list.append(CommentInfo(
+                                    user=reply.get('member', {}).get('uname', '未知'),
+                                    message=reply.get('content', {}).get('message', '').strip(),
+                                    like=reply.get('like', 0),
+                                    reply_count=0,
+                                    reply_to=c.get('member', {}).get('uname', '')
+                                ))
+                                if len([x for x in comments_list if x.reply_to]) >= max_replies_per_comment:
+                                    break
+                    except Exception as e:
+                        logger.debug(f"获取评论 {c.get('rpid')} 的回复失败: {e}")
+                        continue
+            
+            logger.info(f"✅ 成功获取 {len(comments_list)} 条评论/回复信息")
+            return comments_list
+            
+        except Exception as e:
+            logger.warning(f"获取评论失败: {e}")
+            return None
     
     def get_video_info(self, bvid: str) -> Optional[VideoInfo]:
         """获取视频信息"""
@@ -710,9 +823,10 @@ class BilibiliTranscriber:
         transcript: List[TranscriptSegment],
         video_info: VideoInfo,
         output_path: Path,
-        format: str = "txt"
+        format: str = "txt",
+        comments: Optional[List[CommentInfo]] = None
     ) -> bool:
-        """保存转录结果"""
+        """保存转录结果（含可选评论信息）"""
         try:
             output_path.parent.mkdir(parents=True, exist_ok=True)
             
@@ -733,6 +847,8 @@ class BilibiliTranscriber:
                         "processing_time": datetime.now().isoformat()
                     }
                 }
+                if comments:
+                    data["comments"] = [asdict(c) for c in comments]
                 with open(output_path, 'w', encoding='utf-8') as f:
                     json.dump(data, f, ensure_ascii=False, indent=2)
             
@@ -747,9 +863,27 @@ class BilibiliTranscriber:
                     f"- 发布时间：{datetime.fromtimestamp(video_info.pubdate).strftime('%Y-%m-%d %H:%M:%S')}",
                     f"- 处理时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
                     "",
-                    "**转录内容**",
-                    ""
                 ]
+                
+                # 评论区信息
+                if comments:
+                    lines.append("---")
+                    lines.append("")
+                    lines.append("## 💬 热门评论")
+                    lines.append("")
+                    for c in comments:
+                        if c.reply_to:
+                            lines.append(f"> 💬 **{c.user}** 回复 **{c.reply_to}**：{c.message}")
+                        else:
+                            lines.append(f"### 👍 {c.like} · {c.user}")
+                            lines.append("")
+                            lines.append(c.message)
+                            lines.append("")
+                    lines.append("---")
+                    lines.append("")
+                
+                lines.append("**转录内容**")
+                lines.append("")
                 
                 for seg in transcript:
                     lines.append(f"[{seg.start:.2f}s -> {seg.end:.2f}s] {seg.text}")
@@ -895,9 +1029,29 @@ class BilibiliTranscriber:
                 if len(transcript_text) < 50:
                     warnings.append(f"转录内容过短：{len(transcript_text)} 字")
             
+            # ========== 额外步骤：获取热门评论 ==========
+            comments = None
+            try:
+                # 获取 aid
+                from bilibili_api import video as bilibili_video
+                aid = None
+                if self.credential:
+                    import requests as req
+                    info_url = f'https://api.bilibili.com/x/web-interface/view?bvid={bvid}'
+                    r = req.get(info_url, headers={'User-Agent': 'Mozilla/5.0'})
+                    if r.status_code == 200:
+                        aid = r.json().get('data', {}).get('aid')
+                
+                if aid:
+                    comments = self.get_comments(bvid, aid, max_count=30, max_replies_per_comment=3)
+                else:
+                    logger.warning("无法获取 aid，跳过评论获取")
+            except Exception as e:
+                logger.warning(f"获取评论失败（非关键步骤）: {e}")
+            
             # 保存结果
             transcript_path = video_output_dir / f"transcript.{output_format}"
-            if not self.save_transcript(transcript, video_info, transcript_path, output_format):
+            if not self.save_transcript(transcript, video_info, transcript_path, output_format, comments=comments):
                 return ProcessingResult(
                     success=False,
                     error="保存转录结果失败"
@@ -926,7 +1080,8 @@ class BilibiliTranscriber:
                 transcript_path=str(transcript_path),
                 processing_time=processing_time,
                 warnings=warnings if warnings else None,
-                method_used=method_used
+                method_used=method_used,
+                comments=comments
             )
             
             logger.info("\n" + "=" * 60)
@@ -946,86 +1101,41 @@ class BilibiliTranscriber:
 
 
 class BilibiliLogin:
-    """B 站扫码登录工具"""
+    """B 站扫码登录工具（使用 cookie_manager）"""
     
     def __init__(self):
         self.qrcode_key = None
         self.qrcode_url = None
     
     def generate_qr(self) -> str:
-        """生成登录二维码"""
-        import qrcode
+        """生成登录二维码，返回二维码图片路径"""
+        from cookie_manager import BilibiliQRLogin
         
-        url = "https://passport.bilibili.com/x/passport-login/web/qrcode/generate"
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-        }
-        
-        response = requests.get(url, headers=headers)
-        data = response.json()
-        
-        if data.get('code') == 0:
-            self.qrcode_key = data['data']['qrcode_key']
-            self.qrcode_url = data['data']['url']
-            
-            qr = qrcode.QRCode(version=1, box_size=10, border=5)
-            qr.add_data(self.qrcode_url)
-            qr.make(fit=True)
-            
-            img = qr.make_image(fill_color="black", back_color="white")
-            qr_path = "/tmp/bilibili_login_qr.png"
-            img.save(qr_path)
-            
-            logger.info(f"二维码已生成：{qr_path}")
-            return self.qrcode_url
-        else:
-            raise Exception(f"生成二维码失败：{data}")
+        login = BilibiliQRLogin()
+        qr_path = login.generate_qr_code()
+        self.qrcode_key = login.qrcode_key
+        self.qrcode_url = login.qrcode_url
+        return qr_path
     
     def poll(self) -> Dict[str, Any]:
         """轮询登录状态"""
-        if not self.qrcode_key:
-            raise Exception("请先生成二维码")
+        from cookie_manager import BilibiliQRLogin
         
-        url = f"https://passport.bilibili.com/x/passport-login/web/qrcode/poll?qrcode_key={self.qrcode_key}"
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-        }
+        login = BilibiliQRLogin()
+        login.qrcode_key = self.qrcode_key
+        login.qrcode_url = self.qrcode_url
         
-        response = requests.get(url, headers=headers)
-        data = response.json()
+        result = login.poll_login(timeout_seconds=180)
         
-        if data.get('code') == 0:
-            result = data['data']
-            
-            if 'url' in result:
-                import urllib.parse
-                parsed = urllib.parse.urlparse(result['url'])
-                params = urllib.parse.parse_qs(parsed.query)
-                
-                cookie = {
-                    'SESSDATA': params.get('SESSDATA', [''])[0],
-                    'bili_jct': params.get('bili_jct', [''])[0],
-                    'DedeUserID': params.get('DedeUserID', [''])[0],
-                }
-                
-                from bilibili_api import Credential, user, sync
-                credential = Credential(
-                    sessdata=cookie['SESSDATA'],
-                    bili_jct=cookie['bili_jct'],
-                    dedeuserid=cookie['DedeUserID']
-                )
-                
-                u = user.User(credential=credential)
-                user_info = sync(u.get_user_info())
-                
-                return {
-                    'success': True,
-                    'username': user_info.get('name', 'Unknown'),
-                    'is_vip': user_info.get('vipStatus', 0) == 1,
-                    'cookie': f"SESSDATA={cookie['SESSDATA']}; bili_jct={cookie['bili_jct']}; DedeUserID={cookie['DedeUserID']}"
-                }
+        if result.get('success'):
+            return {
+                'success': True,
+                'username': result.get('username', 'Unknown'),
+                'is_vip': result.get('is_vip', False),
+                'cookie': result.get('cookie', '')
+            }
         
-        return {'success': False}
+        return {'success': False, 'error': result.get('error', '登录失败')}
 
 
 if __name__ == "__main__":

@@ -1,68 +1,24 @@
-# Python
+# Cookie files
+.bilibili_cookie
+.bilibili_cookie_*
+
+# Python cache
 __pycache__/
 *.py[cod]
 *$py.class
-*.so
-.Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
+
+# Build artifacts
+*.tar.gz
 *.egg-info/
-.installed.cfg
-*.egg
-
-# Virtual Environment
-.env
-.venv
-env/
-venv/
-ENV/
-env.bak/
-venv.bak/
-
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-
-# OS
-.DS_Store
-.DS_Store?
-._*
-.Spotlight-V100
-.Trashes
-ehthumbs.db
-Thumbs.db
+dist/
+build/
 
 # Logs
 *.log
-bilibili_transcriber.log
+
+# Temp files
+tmp*
+tmpr*
 
 # Output
 bilibili_transcripts/
-output/
-
-# Temporary files
-*.tmp
-*.temp
-temp/
-
-# Config
-config.local.yaml
-*.local.yaml
-
-# Cookie files (sensitive)
-*.cookie.txt
-bilibili_cookie.txt
-cookies/

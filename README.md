@@ -1,59 +1,55 @@
 # 🎬 B站视频转录专家
 
-**专业处理B站视频字幕问题，支持语音转文字、字幕下载、内容分析**
+**专业处理B站视频字幕问题，支持语音转文字、字幕下载、内容分析、热门评论获取**
 
 [![Python Version](https://img.shields.io/badge/python-3.8%2B-blue)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+[![Version](https://img.shields.io/badge/version-2.1.0-brightgreen)]()
 
 ## ✨ 特性
 
 ### 🎯 核心功能
-- **智能字幕处理**：自动检测B站字幕系统状态，智能选择最佳方案
-- **语音转文字**：使用Whisper模型进行高精度语音识别
+- **智能字幕处理**：自动按优先级获取（CC 字幕 → AI 字幕 → 音频转录 → 视频下载）
+- **语音转文字**：使用 Whisper / Vosk 模型进行高精度语音识别
+- **💬 热门评论获取**：自动提取视频评论区精华信息
+- **Cookie 安全存储**：多路径冗余存储 + immutable 写保护
+- **扫码登录**：支持 B 站扫码登录，自动管理 Cookie
 - **国内镜像支持**：自动使用国内镜像源，解决网络问题
-- **错误处理**：自动检测字幕关联错误，切换到语音转文字
-- **批量处理**：支持批量处理多个B站视频
+- **批量处理**：支持批量处理多个 B 站视频
 
-### 🔧 技术特点
-- **绕过B站字幕系统**：直接处理音频，避免字幕关联错误
-- **多模型支持**：Whisper base/small/medium模型可选
-- **Cookie管理**：支持Cookie文件管理和自动刷新
-- **进度显示**：实时显示下载和转录进度
-- **结果验证**：自动验证转录内容与视频标题相关性
+### 🆕 v2.1.0 新增
+- **热门评论获取**：自动获取按点赞排序的热门评论及回复
+- **评论输出**：Markdown/JSON 格式均包含评论区信息
+- **非关键路径**：评论获取失败不影响主流程
 
 ## 🚀 快速开始
 
 ### 安装
 
 ```bash
-# 1. 下载技能包
-git clone https://github.com/community/bilibili-transcriber-pro.git
-cd bilibili-transcriber-pro
+# 1. 从 ClawHub 安装（推荐）
+clawhub install bilibili-video-transcriber
 
-# 2. 运行安装脚本
-python setup.py
-
-# 或手动安装
+# 2. 或从 GitHub 克隆
+git clone https://github.com/adolescen-he/bilibili-video-transcriber.git
+cd bilibili-video-transcriber
 pip install -r requirements.txt
 ```
 
-### 配置Cookie
+### 扫码登录（推荐）
 
 ```bash
-# 编辑Cookie文件
-nano ~/.bilibili_cookie.txt
-
-# 添加你的B站Cookie（从浏览器开发者工具获取）
-# 格式: SESSDATA=xxx; bili_jct=xxx; buvid3=xxx; DedeUserID=xxx
+# 扫码登录，自动保存 Cookie
+bilibili-transcribe --login
 ```
 
 ### 基本使用
 
 ```bash
-# 处理单个视频
+# 处理单个视频（自动获取字幕 + 评论）
 bilibili-transcribe BV1txQGByERW
 
-# 指定Cookie文件
+# 指定 Cookie 文件
 bilibili-transcribe BV1txQGByERW --cookie ~/.bilibili_cookie.txt
 
 # 批量处理
@@ -86,65 +82,80 @@ bilibili-transcribe <BV号> [选项]
 from bilibili_transcriber import BilibiliTranscriber
 
 # 初始化
-transcriber = BilibiliTranscriber(
-    cookie_file="~/.bilibili_cookie.txt",
-    model="base",
-    use_china_mirror=True
-)
+transcriber = BilibiliTranscriber()
 
-# 处理视频
-result = transcriber.process(
-    bvid="BV1txQGByERW",
-    output_dir="./output"
-)
+# 处理视频（自动获取字幕 + 热门评论）
+result = transcriber.process(bvid="BV1txQGByERW")
 
 if result.success:
     print(f"✅ 处理成功: {result.video_info.title}")
     print(f"📄 转录文件: {result.transcript_path}")
-    print(f"⏰ 处理时间: {result.processing_time:.2f}秒")
+    
+    # 评论信息
+    if result.comments:
+        for c in result.comments[:3]:
+            print(f"💬 [{c.user}] {c.message[:60]}")
 ```
 
-## 🎯 使用案例
+## 💬 评论获取功能详解
 
-### 案例1：技术教程转录
+处理视频时自动获取**按点赞排序的热门评论**：
 
-```bash
-# 转录AI技术教程
-bilibili-transcribe BV1txQGByERW --output ./ai_tutorials
+### 特性
+- 最多获取 30 条热评
+- 每条热评可获取 3 条回复
+- 按点赞数排序（B 站 `OrderType.LIKE`）
+- 非关键路径，获取失败不影响主流程
 
-# 生成学习笔记
-bilibili-transcribe BV1txQGByERW --format markdown
+### 输出示例
+
+**Markdown 格式：**
+```markdown
+## 💬 热门评论
+
+### 👍 5 · 磊哥聊AI
+实现步骤：
+1.升级爱马仕：hermes update
+2.打开控制台：hermes dashboard
+3.打开网关：hermes gateway
+
+### 👍 2 · 章鱼柔
+这更像是一个后台管理系统，不是用户的使用界面
 ```
 
-### 案例2：内容分析
-
-```python
-# 分析多个视频内容
-from bilibili_transcriber import BilibiliTranscriber
-
-transcriber = BilibiliTranscriber()
-bvids = ["BV1txQGByERW", "BV1xxxxxxx"]
-
-for bvid in bvids:
-    result = transcriber.process(bvid)
-    if result.success:
-        print(f"✅ {bvid}: {result.video_info.title}")
+**CLI 输出：**
+```
+💬 评论: 获取 5 条热评 + 2 条回复
+热门评论（前3条）:
+  👍5 [磊哥聊AI] 实现步骤：1.升级爱马仕：hermes update 2.打开控制台...
+  👍2 [章鱼柔] 这更像是一个后台管理系统
 ```
 
-### 案例3：自动化监控
+## 🔧 Cookie 安全机制
 
-```python
-# 监控特定UP主的新视频
-import time
-from bilibili_transcriber import BilibiliTranscriber
+```
+存储路径（3重冗余）:
+  1. 技能目录: .bilibili_cookie ← immutable 保护
+  2. 用户目录: ~/.bilibili_cookie_storage
+  3. 配置目录: ~/.config/bilibili_transcriber/cookie
 
-def check_new_videos(up_mid):
-    # 实现视频检查逻辑
-    pass
+运行引用: ~/.bilibili_cookie.txt（600权限）
 
-while True:
-    check_new_videos("12345678")
-    time.sleep(3600)  # 每小时检查一次
+失效时: → 自动检测 → 生成二维码 → 通过飞书发送 → 用户扫码 → 自动保存
+```
+
+## 📊 智能处理优先级
+
+```
+【步骤 1】获取 CC 字幕（1-3 秒）✅ 有字幕直接完成
+    ↓ 失败
+【步骤 2】获取 AI 字幕（1-3 秒）✅ 有 AI 字幕直接完成
+    ↓ 失败
+【步骤 3】下载音频并转录（30-120 秒）✅ 无需下载视频
+    ↓ 失败
+【步骤 4】下载视频并提取音频（60-300 秒）✅ 最后选择
+
+额外：获取热门评论（1-3 秒）💬 自动进行，不影响主流程
 ```
 
 ## ⚙️ 配置
@@ -152,116 +163,58 @@ while True:
 配置文件位置：`~/.config/bilibili_transcriber/config.yaml`
 
 ```yaml
+# Cookie 配置
+cookie:
+  auto_refresh: true
+  refresh_interval: 86400  # 24 小时
+  redundant_storage: true   # 启用冗余存储
+
 # 模型配置
 model:
-  name: "base"           # base/small/medium
-  device: "cpu"          # cpu/cuda
-  compute_type: "int8"   # int8/float16/float32
-  language: "zh"         # 语言代码
+  engine: "whisper"    # whisper / vosk
+  device: null         # 自动选择
 
-# 网络配置
-network:
-  hf_endpoint: "https://hf-mirror.com"  # 国内镜像
-  timeout: 30
-  retry_times: 3
-
-# 输出配置
-output:
-  default_dir: "./bilibili_transcripts"
-  save_audio: true
-  format: "txt"          # txt/json/markdown
+# 评论配置（v2.1.0 新增）
+comment:
+  enabled: true          # 是否获取评论
+  max_count: 30          # 最多获取多少条热评
+  max_replies: 3         # 每条热评最多获取多少条回复
 ```
+
+## 📊 输出格式
+
+### Markdown 格式（推荐）
+包含评论区信息、视频信息、全部转录内容。
+
+### JSON 格式
+包含 `video_info`、`transcript`、`comments` 数组、`metadata`。
+
+### 文本格式
+纯时间戳 + 文本，适合进一步处理。
 
 ## 🔍 故障排除
 
-### 常见问题
-
-#### 1. Cookie失效
+### Cookie 相关问题
 ```bash
-# 检查Cookie状态
+# 检查 Cookie 状态
 bilibili-transcribe --check-cookie
 
-# 更新Cookie
-bilibili-transcribe --update-cookie "SESSDATA=xxx; bili_jct=xxx"
+# 扫码登录
+bilibili-transcribe --login
 ```
 
-#### 2. 网络问题
-```bash
-# 使用代理
-export HTTP_PROXY="http://127.0.0.1:7890"
-export HTTPS_PROXY="http://127.0.0.1:7890"
-bilibili-transcribe BV1txQGByERW
-```
+### 评论获取失败
+评论获取是非关键步骤，不影响字幕处理。常见原因：
+- 视频评论被关闭
+- 网络问题
+- API 限流
 
-#### 3. 模型下载失败
-```bash
-# 使用国内镜像
-export HF_ENDPOINT="https://hf-mirror.com"
-bilibili-transcribe BV1txQGByERW
-```
-
-### 调试模式
-
-```bash
-# 启用详细日志
-bilibili-transcribe BV1txQGByERW --verbose --debug
-
-# 查看日志文件
-tail -f bilibili_transcriber.log
-```
-
-## 📊 输出示例
-
-### 文本格式
-```
-[0.00s -> 3.90s] 兄弟们HermesAgent刚刚发布了更新4.13
-[3.90s -> 5.76s] 那么这一次最大的一个升级呢
-[5.76s -> 9.00s] 是它带来了本地的外部控制面板
-...
-```
-
-### JSON格式
-```json
-{
-  "video_info": {
-    "bvid": "BV1txQGByERW",
-    "title": "HermesAgent突然上WebUI了！这一波，体验直接拉满",
-    "duration": 210,
-    "up": "磊哥聊AI"
-  },
-  "transcript": [
-    {
-      "start": 0.0,
-      "end": 3.9,
-      "text": "兄弟们HermesAgent刚刚发布了更新4.13",
-      "confidence": 0.95
-    }
-  ]
-}
-```
-
-### Markdown格式
-```markdown
-# HermesAgent突然上WebUI了！这一波，体验直接拉满
-
-**视频信息**
-- BV号: BV1txQGByERW
-- 时长: 210秒
-- UP主: 磊哥聊AI
-- 处理时间: 2026-04-15 08:16:00
-
-**核心内容**
-1. HermesAgent 4.13版本发布
-2. 新增本地WebUI控制面板
-3. 支持中英文界面
-4. 提供状态监控、会话管理等功能
-```
-
-## 🏗️ 架构设计
+## 🏗️ 项目结构
 
 ```
-bilibili-transcriber-pro/
-├── bilibili_transcriber.py    # 核心处理模块
+bilibili-video-transcriber/
+├── bilibili_transcriber.py    # 核心处理模块（字幕 + 评论）
+├── cookie_manager.py          # Cookie 安全存储管理
 ├── cli.py                     # 命令行接口
 ├── config.yaml                # 配置文件
 ├── setup.py                   # 安装脚本
@@ -269,38 +222,25 @@ bilibili-transcriber-pro/
 ├── README.md                  # 说明文档
 ├── SKILL.md                   # 技能文档
 ├── package.json               # 包配置
-├── test_install.py            # 测试脚本
 └── examples/                  # 示例文件
-    ├── bv_list.txt           # BV号列表示例
-    └── README.md             # 使用示例
 ```
-
-## 🤝 贡献
-
-欢迎贡献代码、报告问题或提出建议！
-
-1. Fork项目
-2. 创建功能分支 (`git checkout -b feature/AmazingFeature`)
-3. 提交更改 (`git commit -m 'Add some AmazingFeature'`)
-4. 推送到分支 (`git push origin feature/AmazingFeature`)
-5. 创建Pull Request
 
 ## 📄 许可证
 
-本项目采用 MIT 许可证
+MIT License
 
 ## 🙏 致谢
 
-- [bilibili-api](https://github.com/MoyuScript/bilibili-api) - B站API封装
-- [faster-whisper](https://github.com/guillaumekln/faster-whisper) - 快速Whisper实现
+- [bilibili-api](https://github.com/Nemo2011/bilibili-api) - B 站 API 封装
+- [faster-whisper](https://github.com/guillaumekln/faster-whisper) - 快速 Whisper 实现
+- [Vosk](https://github.com/alphacep/vosk-api) - 离线语音识别
 - [OpenAI Whisper](https://github.com/openai/whisper) - 语音识别模型
 
 ## 📞 支持
 
-- 问题反馈: GitHub Issues
-- 文档: README.md
-- 示例: examples/
+- **GitHub Issues**: https://github.com/adolescen-he/bilibili-video-transcriber/issues
+- **ClawHub**: https://clawhub.ai/skills/bilibili-video-transcriber
 
 ---
 
-**基于实际经验开发，专门解决B站字幕系统错误问题，稳定可靠！**
+**基于实际经验开发，专门解决 B 站字幕系统各种问题，稳定可靠！** 🎬💬

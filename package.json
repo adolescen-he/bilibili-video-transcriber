@@ -1,7 +1,7 @@
 {
   "name": "bilibili-video-transcriber",
-  "version": "2.0.0",
-  "description": "专业处理 B 站视频字幕问题，支持语音转文字、字幕下载、内容分析（v2.0 优化优先级 + 智能模型选择）",
+  "version": "2.1.0",
+  "description": "专业处理 B 站视频字幕问题，支持语音转文字、字幕下载、内容分析、热门评论获取（v2.1 新增评论功能）",
   "main": "bilibili_transcriber.py",
   "scripts": {
     "install": "python setup.py",
@@ -11,6 +11,7 @@
   "keywords": [
     "bilibili",
     "transcribe",
+    "comments",
     "whisper",
     "vosk",
     "subtitle",
@@ -83,6 +84,15 @@
       ]
     },
     "changelog": {
+      "2.1.0": {
+        "date": "2026-05-07",
+        "changes": [
+          "💬 新增热门评论获取功能：自动获取按点赞排序的评论及回复",
+          "📝 评论数据集成到 Markdown、JSON 和 CLI 输出",
+          "🛡️ 评论获取为非关键路径，失败不影响主流程",
+          "📖 更新 README 文档，突出评论功能"
+        ]
+      },
       "2.0.0": {
         "date": "2026-04-19",
         "changes": [

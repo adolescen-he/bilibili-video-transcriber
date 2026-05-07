@@ -6,6 +6,7 @@ B站视频转录专家 - 命令行工具
 import os
 import sys
 import json
+import time
 import argparse
 import logging
 from pathlib import Path
@@ -15,6 +16,11 @@ from typing import List, Optional
 sys.path.insert(0, str(Path(__file__).parent))
 
 from bilibili_transcriber import BilibiliTranscriber, ProcessingResult
+from cookie_manager import (
+    save_cookie, load_cookie, check_cookie_valid,
+    needs_cookie_refresh, COOKIE_ACTIVE_PATH,
+    BilibiliQRLogin, send_qr_via_feishu
+)
 
 def setup_logging(verbose: bool = False, debug: bool = False):
     """设置日志"""
@@ -50,6 +56,20 @@ def print_result(result: ProcessingResult, show_transcript: bool = False):
         
         if result.processing_time:
             print(f"⏰ 处理时间: {result.processing_time:.2f}秒")
+        
+        # 显示评论信息
+        if result.comments:
+            hot_count = len([c for c in result.comments if not c.reply_to])
+            reply_count = len([c for c in result.comments if c.reply_to])
+            print(f"💬 评论: 获取 {hot_count} 条热评 + {reply_count} 条回复")
+            if show_transcript or True:  # 默认展示前3条热评
+                print("\n💬 热门评论（前3条）:")
+                shown = 0
+                for c in result.comments:
+                    if not c.reply_to and shown < 3:
+                        msg_preview = c.message[:80] + ("..." if len(c.message) > 80 else "")
+                        print(f"  0001F44D{C.LIKE} [{C.USER}] {MSG_PREVIEW}")
+                        shown += 1
         
         if result.transcript and show_transcript:
             print("\n📝 转录内容（前5段）:")
@@ -262,6 +282,49 @@ def update_cookie(cookie_file: str, cookie_str: str) -> bool:
         print(f"❌ 更新Cookie失败: {e}")
         return False
 
+def interactive_login() -> bool:
+    """
+    交互式扫码登录
+    生成二维码并输出到文件/飞书信号
+    """
+    print("\n" + "="*60)
+    print("📱 B 站扫码登录")
+    print("="*60)
+    
+    login = BilibiliQRLogin()
+    
+    # 生成二维码
+    print("\n⏳ 正在生成二维码...")
+    qr_path = login.generate_qr_code()
+    print(f"✅ 二维码已生成")
+    print(f"🖼️  图片路径: {qr_path}")
+    
+    # 通过飞书发送二维码
+    print("📨 正在通过飞书发送二维码...")
+    sent = send_qr_via_feishu(qr_path)
+    if sent:
+        print("✅ 二维码已通过飞书发送，请查看飞书消息扫码")
+        print("   扫码后请回复「已扫码」")
+    else:
+        print("⚠️ 飞书发送失败，请手动打开二维码图片扫码")
+        print(f"   二维码图片: {qr_path}")
+    
+    # 轮询等待
+    print("\n⏳ 等待扫码中（180秒超时）...")
+    result = login.poll_login(timeout_seconds=180)
+    
+    if result.get('success'):
+        print(f"\n✅ 登录成功！")
+        print(f"👤 用户: {result.get('username')}")
+        print(f"🏆 大会员: {'✅' if result.get('is_vip') else '❌'}")
+        print(f"💾 Cookie 已自动保存到冗余存储")
+        return True
+    else:
+        print(f"\n❌ 登录失败: {result.get('error', '超时')}")
+        print("请重新运行 --login 再试")
+        return False
+
+
 def main():
     """主函数"""
     parser = argparse.ArgumentParser(
@@ -272,37 +335,41 @@ def main():
   # 处理单个视频
   %(prog)s BV1txQGByERW
   
-  # 指定Cookie文件
-  %(prog)s BV1txQGByERW --cookie ~/.bilibili_cookie.txt
-  
-  # 使用medium模型
-  %(prog)s BV1txQGByERW --model medium
-  
-  # 批量处理
-  %(prog)s --batch bv_list.txt --parallel 3
+  # 扫码登录
+  %(prog)s --login
   
   # 检查Cookie状态
   %(prog)s --check-cookie
   
   # 更新Cookie
   %(prog)s --update-cookie "SESSDATA=xxx; bili_jct=xxx"
+  
+  # 指定Cookie文件
+  %(prog)s BV1txQGByERW --cookie ~/.bilibili_cookie.txt
+  
+  # 批量处理
+  %(prog)s --batch bv_list.txt
         """
     )
     
-    # 视频参数
-    video_group = parser.add_mutually_exclusive_group(required=True)
-    video_group.add_argument(
+    # 视频参数（改为非必填）
+    parser.add_argument(
         'bvid',
         nargs='?',
         help='B站视频BV号'
     )
-    video_group.add_argument(
+    parser.add_argument(
         '--batch',
         metavar='FILE',
         help='批量处理，指定包含BV号列表的文件'
     )
     
     # 功能参数
+    parser.add_argument(
+        '--login',
+        action='store_true',
+        help='扫码登录B站（推荐）'
+    )
     parser.add_argument(
         '--check-cookie',
         action='store_true',
@@ -318,7 +385,7 @@ def main():
     parser.add_argument(
         '--cookie',
         metavar='FILE',
-        help='Cookie文件路径（默认: ~/.bilibili_cookie.txt）'
+        help='Cookie文件路径（默认由 cookie_manager 管理）'
     )
     parser.add_argument(
         '--model',
@@ -364,7 +431,7 @@ def main():
     parser.add_argument(
         '--version',
         action='version',
-        version='B站视频转录专家 v1.0.0'
+        version='B站视频转录专家 v2.0 - Cookie管理增强版'
     )
     
     args = parser.parse_args()
@@ -374,16 +441,44 @@ def main():
     
     # 处理不同模式
     try:
-        if args.check_cookie:
-            # 检查Cookie模式
-            cookie_file = args.cookie or "~/.bilibili_cookie.txt"
-            success = check_cookie(cookie_file)
+        if args.login:
+            # 扫码登录模式
+            success = interactive_login()
             sys.exit(0 if success else 1)
         
+        elif args.check_cookie:
+            # 检查 Cookie 状态
+            print("\n📋 Cookie 状态检查")
+            print("=" * 60)
+            
+            cookie_str = load_cookie()
+            if cookie_str:
+                check = check_cookie_valid(cookie_str)
+                if check["valid"]:
+                    print(f"✅ Cookie 有效")
+                    print(f"👤 用户: {check.get('username')}")
+                    print(f"🏆 大会员: {'✅' if check.get('is_vip') else '❌'}")
+                else:
+                    print(f"❌ Cookie 已失效: {check.get('error')}")
+                    print(f"   请运行 '{sys.argv[0]} --login' 重新登录")
+                print(f"📂 存储路径: {COOKIE_ACTIVE_PATH}")
+            else:
+                print(f"❌ Cookie 文件不存在")
+                print(f"   请运行 '{sys.argv[0]} --login' 进行扫码登录")
+            
+            sys.exit(0 if (cookie_str and check.get('valid')) else 1)
+        
         elif args.update_cookie:
-            # 更新Cookie模式
-            cookie_file = args.cookie or "~/.bilibili_cookie.txt"
-            success = update_cookie(cookie_file, args.update_cookie)
+            # 更新Cookie
+            success = save_cookie(args.update_cookie)
+            if success:
+                check = check_cookie_valid(args.update_cookie)
+                if check["valid"]:
+                    print(f"✅ Cookie 已更新，用户: {check['username']}")
+                else:
+                    print(f"⚠️ Cookie 已保存但可能无效: {check.get('error')}")
+            else:
+                print("❌ 保存 Cookie 失败")
             sys.exit(0 if success else 1)
         
         elif args.batch:
@@ -401,7 +496,7 @@ def main():
             )
             sys.exit(0 if success else 1)
         
-        else:
+        elif args.bvid:
             # 单个视频处理模式
             success = process_single(
                 bvid=args.bvid,
@@ -414,6 +509,10 @@ def main():
                 debug=args.debug
             )
             sys.exit(0 if success else 1)
+        
+        else:
+            parser.print_help()
+            sys.exit(0)
     
     except KeyboardInterrupt:
         print("\n\n⏹️ 用户中断")
