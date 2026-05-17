@@ -1,12 +1,16 @@
 {
-  "version": "2.1.0",
-  "releaseDate": "2026-05-07T14:30:00+08:00",
+  "version": "2.2.0",
+  "releaseDate": "2026-05-17T13:30:00+08:00",
   "changes": [
-    "新增热门评论获取功能：自动获取按点赞排序的评论及回复",
-    "评论数据集成到 Markdown、JSON 和 CLI 输出",
-    "评论获取为非关键路径，失败不影响主流程",
-    "更新 README 文档，突出评论功能"
+    "输出目录改为 {UP主}_{标题} 格式替代 BV 号",
+    "Vosk 分块转写支持（每块180秒），避免低内存 OOM",
+    "Vosk 转写增加准确时间戳（不再硬编码为0）",
+    "新增 create_lark_doc() 方法，一键创建飞书文档",
+    "process() 自动保存 txt + json + markdown 三种格式",
+    "内存检测阈值优化：<2GB 用 Vosk 分块，2-8GB 用 whisper tiny",
+    "save_transcript() markdown 格式优化（表格+结构化布局）",
+    "飞书 lark-cli 文档创建实战 bug 修复及解决方案"
   ],
   "breaking": false,
-  "gitTag": "v2.1.0"
+  "gitTag": "v2.2.0"
 }

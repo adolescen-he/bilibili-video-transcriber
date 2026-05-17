@@ -317,13 +317,93 @@ bilibili-transcribe --update-cookie "SESSDATA=xxx; bili_jct=xxx"
 bilibili-transcribe --check-cookie
 ```
 
+## 📝 飞书文档创建经验
+
+### ⚠️ lark-cli 1.0.18 已知问题
+
+**问题**：`lark-cli docs +create --markdown ./file.md` 会错误地将**文件名本身**写入内容，而非文件内容。
+
+**解决方法**：使用 pipe 方式传入 Markdown 内容：
+```bash
+cat content.md | lark-cli docs +create \
+  --title "[视频总结] UP主名 - 标题 - 日期" \
+  --markdown - \
+  --wiki-space "知识空间ID"
+```
+
+### 📍 飞书自定义域名
+
+飞书返回的 `doc_url` 为 `https://www.feishu.cn/wiki/...`，但企业可能使用自定义域名（如 `https://企业名.feishu.cn/wiki/...`）。
+
+直接点返回的 `doc_url` 可能跳转失败，需要**在知识库内找到实际链接**，用企业自定义域名格式发送给用户。
+
+### 📑 Markdown 格式注意
+
+1. **表格**：必须使用 `<lark-table>` 标签格式，标准 Markdown 表格（`| ... |`）在飞书中可能不渲染
+2. **高亮块**：使用 `<callout emoji="🎬" background-color="light-blue">...</callout>` 标签
+3. **分栏**：使用 `<grid cols="2"><column>...</column></grid>` 标签
+4. **一级标题**：文档标题通过 `--title` 参数设置，Markdown 内容中**不要**包含相同的一级标题（`#`）
+5. **emoji 参数**：在 `<callout>` 标签的 `emoji` 属性中使用实际 emoji 字符（如 `🎬`），而非名称（如 `clapper`）
+
+### 📦 文档存储结构
+```markdown
+文档结构模板：
+1. <callout> 高亮块 — 说明文字
+2. ## 📋 视频信息 — lark-table 行列式表格
+3. ## 📝 结构化内容总结 — 分段详解（源自字幕/转写）
+4. ## 🔑 核心要点 — 提炼的干货要点
+5. ## 💬 热门评论 — 评论区精选
+6. ## 🔗 字幕文件 — 原始文件说明
+```
+
+### 🔐 认证说明
+
+- 使用 `lark-cli` 前需先完成 `lark-cli auth login`
+- 认证后凭体验证 `lark-cli docs +create` 可用
+- 文档创建到知识空间需指定 `--wiki-space` 参数
+
+## 💻 低资源服务器转写策略
+
+### 硬件环境参考
+- **CPU**：2核
+- **内存**：1.6GB（可用常 < 500MB）
+- **模型**：VOsk small-cn-0.22（66MB）
+
+### 策略对比
+
+| 方案 | 结果 | 说明 |
+|------|------|------|
+| Whisper tiny/base | ❌ OOM | 即使 tiny 也会被杀 |
+| faster-whisper base | ❌ 被 kill | 39分钟后被 OOM kill |
+| Vosk small (66MB) | ✅ 可行 | 16分钟视频214秒转写完成 |
+| Vosk + chunk | ✅ 稳定 | 6×180秒分块处理，避免一次性加载 |
+
+### 推荐流程（无字幕时）
+
+```bash
+# 1. 下载音频（优先 dash audio）
+# 2. ffmpeg 转 WAV（16kHz, mono, 16bit）
+# 3. 分块处理（每块 ≤3 分钟）
+# 4. Vosk 逐块识别 → 拼接
+```
+
+### 输出目录命名
+```
+bilibili_transcripts/{UP主名称}_{视频标题}/  # 取代 BV号 格式
+├── transcript.json   # 含转写+评论的完整数据
+├── transcript.txt    # 纯文本
+├── summary.md        # 结构化总结
+├── summary_full.md   # 详细总结（含评论）
+└── comments.json     # 评论数据
+```
+
 ## 📄 许可证
 
 MIT License
 
 ---
 
-**最后更新：** 2026-05-07
+**最后更新：** 2026-05-17
 
 **本次更新内容：**
 1. ✅ 新增 `get_comments()` 方法：自动获取视频热门评论（按热度排序）
@@ -332,3 +412,7 @@ MIT License
 4. ✅ `print_result()` CLI 输出展示前 3 条热评
 5. ✅ 评论获取非关键步骤，失败不影响主流程
 6. ✅ 支持热评下的回复获取
+7. ✅ 飞书文档创建经验：`lark-cli 1.0.18 --markdown` bug 及 workaround
+8. ✅ Vosk 分块转写策略：chunk 180s × 6，适用于 2GB 内存服务器
+9. ✅ 输出目录命名：采用 `{up_name}_{video_title}` 而非 BV 号
+10. ✅ 飞书自定义域名适配：返回知识库内正确域名链接

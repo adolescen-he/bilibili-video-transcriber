@@ -22,3 +22,8 @@ tmpr*
 
 # Output
 bilibili_transcripts/
+
+# Build artifacts (keep dist/ for reference but not zips in root)
+bilibili-transcriber-pro-*.zip
+bilibili-transcriber-pro-*.tar.gz
+checksums.txt

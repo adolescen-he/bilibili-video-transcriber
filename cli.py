@@ -54,6 +54,9 @@ def print_result(result: ProcessingResult, show_transcript: bool = False):
         if result.audio_path:
             print(f"🎵 音频文件: {result.audio_path}")
         
+        if result.feishu_doc_url:
+            print(f"📄 飞书文档: {result.feishu_doc_url}")
+        
         if result.processing_time:
             print(f"⏰ 处理时间: {result.processing_time:.2f}秒")
         

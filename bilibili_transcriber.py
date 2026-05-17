@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Union, Any
 from dataclasses import dataclass, asdict
 from datetime import datetime
+import re
 
 import requests
 
@@ -84,6 +85,7 @@ class ProcessingResult:
     warnings: Optional[List[str]] = None
     method_used: Optional[str] = None  # 使用的方法：cc_subtitle/ai_subtitle/audio_transcribe
     comments: Optional[List[CommentInfo]] = None  # 热门评论
+    feishu_doc_url: Optional[str] = None  # 飞书文档链接（如已创建）
 
 
 class BilibiliTranscriber:
@@ -186,19 +188,20 @@ class BilibiliTranscriber:
         except:
             pass
         
-        # 推荐模型策略
+        # 推荐模型策略（基于实战经验调优）
+        # whisper 在低内存环境下即使 tiny 也容易 OOM
         if has_cuda:
             recommended_device = "cuda"
             recommended_model = "medium"  # GPU 可以使用更大的模型
         elif memory_gb >= 8:
             recommended_device = "cpu"
             recommended_model = "base"  # 8GB+ 内存可以使用 base
-        elif memory_gb >= 4:
+        elif memory_gb >= 2:
             recommended_device = "cpu"
-            recommended_model = "tiny"  # 4-8GB 使用 tiny
+            recommended_model = "tiny"  # 2-8GB 使用 tiny
         else:
             recommended_device = "cpu"
-            recommended_model = "vosk"  # 内存不足时使用 Vosk
+            recommended_model = "vosk"  # <2GB 使用 Vosk（已支持分块）
         
         return {
             "cpu_count": cpu_count,
@@ -207,6 +210,19 @@ class BilibiliTranscriber:
             "recommended_model": recommended_model,
             "recommended_device": recommended_device
         }
+    
+    @staticmethod
+    def _sanitize_title(title: str, up_name: str, max_len: int = 80) -> str:
+        """生成安全的输出目录名 {up_name}_{title}"""
+        # 清理特殊字符
+        name = f"{up_name}_{title}"
+        name = re.sub(r'[\\/:*?"<>|]', '', name)  # 去掉 Windows 非法字符
+        name = re.sub(r'[！!?？，。、：；]', '', name)  # 去掉中文标点
+        name = re.sub(r'\s+', '', name)  # 去空格
+        # 截断
+        if len(name) > max_len:
+            name = name[:max_len]
+        return name
     
     def _load_cookie(self) -> Optional[str]:
         """加载 Cookie（使用 cookie_manager 冗余存储）"""
@@ -769,8 +785,9 @@ class BilibiliTranscriber:
         return transcript
     
     def _transcribe_with_vosk(self, audio_path: str) -> List[TranscriptSegment]:
-        """使用 Vosk 转录"""
+        """使用 Vosk 转录，支持分块处理避免 OOM"""
         import wave
+        import subprocess
         from vosk import KaldiRecognizer
         
         logger.info(f"使用 Vosk 引擎转录：{audio_path}")
@@ -778,44 +795,85 @@ class BilibiliTranscriber:
         # 转换为 WAV
         wav_path = str(audio_path).replace('.m4a', '_temp.wav').replace('.mp4', '_temp.wav')
         if not Path(wav_path).exists():
-            import subprocess
             subprocess.run([
                 'ffmpeg', '-y', '-i', str(audio_path),
                 '-vn', '-acodec', 'pcm_s16le', '-ar', '16000', '-ac', '1',
                 wav_path
             ], check=True, capture_output=True)
         
-        transcript = []
-        with wave.open(wav_path, "rb") as wf:
-            rec = KaldiRecognizer(self.model, wf.getframerate())
-            
-            while True:
-                data = wf.readframes(4000)
-                if len(data) == 0:
-                    break
-                if rec.AcceptWaveform(data):
-                    result = json.loads(rec.Result())
-                    if result.get('text'):
-                        transcript.append(TranscriptSegment(
-                            start=0,
-                            end=0,
-                            text=result['text']
-                        ))
-            
-            final_result = json.loads(rec.FinalResult())
-            if final_result.get('text'):
-                transcript.append(TranscriptSegment(
-                    start=0,
-                    end=0,
-                    text=final_result['text']
-                ))
+        # 获取音频时长
+        duration_sec = 0
+        try:
+            probe = subprocess.run([
+                'ffprobe', '-v', 'error', '-show_entries', 'format=duration',
+                '-of', 'default=noprint_wrappers=1:nokey=1', wav_path
+            ], capture_output=True, text=True, timeout=15)
+            if probe.stdout.strip():
+                duration_sec = float(probe.stdout.strip())
+        except:
+            pass
         
+        # 分块策略：每块最长 180 秒（适合低内存环境）
+        chunk_sec = 180
+        sample_rate = 16000
+        chunk_frames = chunk_sec * sample_rate
+        
+        transcript = []
+        frame_offset = 0
+        chunk_idx = 0
+        
+        with wave.open(wav_path, "rb") as wf:
+            total_frames = wf.getnframes()
+            logger.info(f"WAV 文件：{total_frames} 帧 ({duration_sec:.1f}s)，"
+                        f"每块 {chunk_frames} 帧 ({chunk_sec}s)，约 {(total_frames // chunk_frames) + 1} 块")
+            
+            while frame_offset < total_frames:
+                chunk_idx += 1
+                # 计算当前块的帧数
+                remaining = total_frames - frame_offset
+                this_chunk = min(chunk_frames, remaining)
+                # 多读一点让 KaldiRecognizer 有更好的上下文
+                read_size = min(this_chunk + sample_rate, remaining)
+                
+                logger.info(f"块 {chunk_idx}: 偏移 {frame_offset} 帧, 读取 {read_size} 帧")
+                
+                wf.setpos(frame_offset)
+                chunk_data = wf.readframes(read_size)
+                
+                rec = KaldiRecognizer(self.model, sample_rate)
+                rec.AcceptWaveform(chunk_data)
+                
+                # 收集结果
+                partial_results = []
+                # KaldiRecognizer 不会在中途给出结果，需要从 AcceptWaveform 获取
+                result = json.loads(rec.Result())
+                if result.get('text'):
+                    partial_results.append(result['text'])
+                
+                final = json.loads(rec.FinalResult())
+                if final.get('text'):
+                    partial_results.append(final['text'])
+                
+                # 合并段落
+                combined = '。'.join(partial_results)
+                if combined:
+                    chunk_start = frame_offset / sample_rate
+                    chunk_end = min(frame_offset + read_size, total_frames) / sample_rate
+                    transcript.append(TranscriptSegment(
+                        start=chunk_start,
+                        end=chunk_end,
+                        text=combined
+                    ))
+                
+                frame_offset += this_chunk
+            
         # 清理临时文件
         try:
             Path(wav_path).unlink()
         except:
             pass
         
+        logger.info(f"Vosk 转写完成：{len(transcript)} 段")
         return transcript
     
     def save_transcript(
@@ -856,14 +914,28 @@ class BilibiliTranscriber:
                 lines = [
                     f"# {video_info.title}",
                     "",
-                    "**视频信息**",
-                    f"- BV 号：{video_info.bvid}",
-                    f"- 时长：{video_info.duration}秒",
-                    f"- UP 主：{video_info.up_name}",
-                    f"- 发布时间：{datetime.fromtimestamp(video_info.pubdate).strftime('%Y-%m-%d %H:%M:%S')}",
-                    f"- 处理时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+                    "## 📋 视频信息",
+                    "",
+                    f"| 项目 | 内容 |",
+                    f"|------|------|",
+                    f"| **视频标题** | {video_info.title} |",
+                    f"| **BV 号** | {video_info.bvid} |",
+                    f"| **UP 主** | {video_info.up_name} |",
+                    f"| **时长** | {video_info.duration}秒 |",
+                    f"| **发布时间** | {datetime.fromtimestamp(video_info.pubdate).strftime('%Y-%m-%d %H:%M:%S')} |",
+                    f"| **处理时间** | {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} |",
                     "",
                 ]
+                
+                # 转录摘要
+                full_text = ''.join([seg.text for seg in transcript])
+                lines.append("---")
+                lines.append("")
+                lines.append(f"## 📝 转录摘要")
+                lines.append("")
+                lines.append(f"- 总段落数：{len(transcript)}")
+                lines.append(f"- 总字符数：{len(full_text)}")
+                lines.append("")
                 
                 # 评论区信息
                 if comments:
@@ -882,7 +954,7 @@ class BilibiliTranscriber:
                     lines.append("---")
                     lines.append("")
                 
-                lines.append("**转录内容**")
+                lines.append("## 📄 完整转录")
                 lines.append("")
                 
                 for seg in transcript:
@@ -901,7 +973,117 @@ class BilibiliTranscriber:
         except Exception as e:
             logger.error(f"保存转录结果失败：{e}")
             return False
-    
+
+    def create_lark_doc(
+        self,
+        output_path: Path,
+        video_info: VideoInfo,
+        transcript: List[TranscriptSegment],
+        comments: Optional[List[CommentInfo]] = None,
+        wiki_space: Optional[str] = None,
+        up_name: Optional[str] = None
+    ) -> Optional[str]:
+        """
+        尝试创建飞书文档（使用 lark-cli）
+        返回文档 URL，失败时返回 None
+        
+        注意：lark-cli 1.0.18 的 --markdown 参数有 bug，需使用 pipe 方式
+        """
+        import subprocess
+        import tempfile
+        
+        # 生成飞书友好格式的 markdown
+        pub_date = datetime.fromtimestamp(video_info.pubdate).strftime('%Y-%m-%d')
+        safe_up = up_name or video_info.up_name
+        doc_title = f"[视频总结] {safe_up} - {self._sanitize_title(video_info.title, safe_up, 40)}"
+        
+        try:
+            # 先用 markdown 格式保存最完整的文档
+            full_text = ''.join([seg.text for seg in transcript])
+            
+            lines = [
+                f"## 📋 视频信息",
+                "",
+                f"| 项目 | 内容 |",
+                f"|------|------|",
+                f"| **视频标题** | {video_info.title} |",
+                f"| **BV 号** | {video_info.bvid} |",
+                f"| **UP 主** | {safe_up} |",
+                f"| **时长** | {video_info.duration // 60}分{video_info.duration % 60}秒 |",
+                f"| **发布时间** | {pub_date} |",
+                f"| **原视频** | [点击观看](https://www.bilibili.com/video/{video_info.bvid}) |",
+                "",
+                "---",
+                "",
+                f"## 📝 结构化内容总结",
+                "",
+                f"- 总段落数：{len(transcript)}",
+                f"- 总字符数：{len(full_text)}",
+                "",
+            ]
+            
+            # 按时间分段
+            for i, seg in enumerate(transcript):
+                start_m = int(seg.start // 60)
+                start_s = int(seg.start % 60)
+                end_m = int(seg.end // 60)
+                end_s = int(seg.end % 60)
+                time_label = f"{start_m}:{start_s:02d} - {end_m}:{end_s:02d}"
+                lines.append(f"### ⏱ {time_label}")
+                lines.append("")
+                lines.append(f"{seg.text}")
+                lines.append("")
+            
+            # 评论
+            if comments:
+                lines.append("---")
+                lines.append("")
+                lines.append("## 💬 热门评论")
+                lines.append("")
+                for c in comments[:10]:  # 最多10条
+                    lines.append(f"- **{c.user}** (👍{c.like}): {c.message[:200]}")
+                lines.append("")
+            
+            lines.append("---")
+            lines.append("")
+            lines.append(f"*处理时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}*")
+            lines.append("")
+            lines.append(f"> ⚠️ 注意: 本内容基于{'字幕' if self.model_name != 'vosk' else 'Vosk语音转写'}生成")
+            
+            md_content = '\n'.join(lines)
+            
+            # 使用 lark-cli 创建文档（pipe 模式避免文件名bug）
+            cmd = ['lark-cli', 'docs', '+create',
+                   '--title', doc_title,
+                   '--markdown', '-']
+            if wiki_space:
+                cmd.extend(['--wiki-space', wiki_space])
+            
+            result = subprocess.run(
+                cmd,
+                input=md_content.encode('utf-8'),
+                capture_output=True,
+                timeout=30
+            )
+            
+            if result.returncode == 0:
+                import json
+                output = result.stdout.decode('utf-8')
+                json_start = output.find('{')
+                if json_start >= 0:
+                    resp = json.loads(output[json_start:])
+                    if resp.get('ok'):
+                        doc_url = resp['data'].get('doc_url', '')
+                        logger.info(f"✅ 飞书文档创建成功: {doc_url}")
+                        return doc_url
+            
+            logger.warning(f"飞书文档创建失败: {result.stderr.decode()[:200]}")
+            return None
+            
+        except Exception as e:
+            logger.warning(f"飞书文档创建异常（非关键步骤）: {e}")
+            return None
+
     def process(
         self,
         bvid: str,
@@ -943,8 +1125,9 @@ class BilibiliTranscriber:
                     error="无法获取视频信息"
                 )
             
-            # 创建输出目录
-            video_output_dir = self.output_dir / bvid
+            # 创建输出目录（使用 {up_name}_{title} 命名而非 BV 号）
+            dir_name = self._sanitize_title(video_info.title, video_info.up_name)
+            video_output_dir = self.output_dir / dir_name
             video_output_dir.mkdir(parents=True, exist_ok=True)
             
             transcript = None
@@ -1049,13 +1232,24 @@ class BilibiliTranscriber:
             except Exception as e:
                 logger.warning(f"获取评论失败（非关键步骤）: {e}")
             
-            # 保存结果
-            transcript_path = video_output_dir / f"transcript.{output_format}"
-            if not self.save_transcript(transcript, video_info, transcript_path, output_format, comments=comments):
-                return ProcessingResult(
-                    success=False,
-                    error="保存转录结果失败"
-                )
+            # 保存结果（txt + json + markdown 三种格式）
+            transcript_txt = video_output_dir / "transcript.txt"
+            transcript_json = video_output_dir / "transcript.json"
+            transcript_md = video_output_dir / "summary.md"
+            
+            self.save_transcript(transcript, video_info, transcript_txt, "txt", comments=comments)
+            self.save_transcript(transcript, video_info, transcript_json, "json", comments=comments)
+            if not self.save_transcript(transcript, video_info, transcript_md, "markdown", comments=comments):
+                logger.error("保存 markdown 失败")
+            
+            # 尝试创建飞书文档（非关键步骤）
+            feishu_url = self.create_lark_doc(
+                video_output_dir, video_info, transcript,
+                comments=comments,
+                up_name=video_info.up_name
+            )
+            if feishu_url:
+                logger.info(f"📄 飞书文档已创建: {feishu_url}")
             
             # 清理临时文件
             if not self.keep_audio:
@@ -1077,11 +1271,12 @@ class BilibiliTranscriber:
                 video_info=video_info,
                 transcript=transcript,
                 audio_path=str(audio_path) if self.keep_audio and method_used in ["audio_transcribe", "video_transcribe"] else None,
-                transcript_path=str(transcript_path),
+                transcript_path=str(transcript_txt),
                 processing_time=processing_time,
                 warnings=warnings if warnings else None,
                 method_used=method_used,
-                comments=comments
+                comments=comments,
+                feishu_doc_url=feishu_url
             )
             
             logger.info("\n" + "=" * 60)

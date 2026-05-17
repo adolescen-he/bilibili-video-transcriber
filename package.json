@@ -1,7 +1,7 @@
 {
   "name": "bilibili-video-transcriber",
-  "version": "2.1.0",
-  "description": "专业处理 B 站视频字幕问题，支持语音转文字、字幕下载、内容分析、热门评论获取（v2.1 新增评论功能）",
+  "version": "2.2.0",
+  "description": "专业处理 B 站视频字幕问题，支持语音转文字、字幕下载、内容分析、热门评论获取、飞书文档创建，Vosk 低内存分块转写",
   "main": "bilibili_transcriber.py",
   "scripts": {
     "install": "python setup.py",
@@ -63,11 +63,22 @@
   },
   "clawhub": {
     "category": "video-processing",
-    "tags": ["bilibili", "transcription", "whisper", "vosk", "subtitle", "smart-selection"],
+    "tags": [
+      "bilibili",
+      "transcription",
+      "whisper",
+      "vosk",
+      "subtitle",
+      "smart-selection"
+    ],
     "icon": "🎬",
     "minOpenClawVersion": "1.0.0",
     "compatibility": {
-      "platforms": ["linux", "darwin", "win32"],
+      "platforms": [
+        "linux",
+        "darwin",
+        "win32"
+      ],
       "python": ">=3.8"
     },
     "installation": {
