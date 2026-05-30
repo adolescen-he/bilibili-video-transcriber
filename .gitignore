@@ -1,0 +1,17 @@
+# 本地 cookie 和配置（不上传）
+bilibili_cookies.txt
+bilibili_cookies.json
+bilibili_transcriber.log
+config.yaml
+
+# 本地运行产生的文件
+bilibili_transcripts/
+__pycache__/
+*.pyc
+
+# ClawHub 元数据
+.clawhub/
+
+# 临时文件
+*.tmp
+*.bak
